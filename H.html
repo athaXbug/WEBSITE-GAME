@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>FF KW</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ background:#020617;
+ font-family:Arial,Helvetica,sans-serif;
+ overflow:hidden;
+ color:#0ff;
+}
+
+/* ===== LOBBY ===== */
+#lobby{
+ position:fixed; inset:0;
+ background:linear-gradient(135deg,#020617,#020617,#0f172a);
+ display:flex; flex-direction:column;
+ align-items:center; justify-content:center;
+ z-index:10;
+}
+#lobby h1{
+ font-size:40px;
+ color:#00ffd5;
+ text-shadow:0 0 25px #00ffd5;
+}
+.lobby-btn{
+ margin-top:30px;
+ padding:15px 45px;
+ font-size:18px;
+ border-radius:30px;
+ border:2px solid #0ff;
+ background:transparent;
+ color:#0ff;
+ box-shadow:0 0 15px #0ff;
+}
+
+/* ===== UI ===== */
+#ui{
+ position:fixed;
+ top:10px; left:10px;
+ font-size:14px;
+ text-shadow:0 0 6px #0ff;
+ z-index:5;
+}
+canvas{display:block}
+
+/* ===== CROSSHAIR ===== */
+#crosshair{
+ position:fixed;
+ top:50%; left:50%;
+ width:20px;height:20px;
+ transform:translate(-50%,-50%);
+ pointer-events:none;
+}
+#crosshair:before,#crosshair:after{
+ content:""; position:absolute; background:#0ff;
+}
+#crosshair:before{width:2px;height:20px;left:9px}
+#crosshair:after{width:20px;height:2px;top:9px}
+
+/* ===== JOYSTICK ===== */
+#joystick{
+ position:fixed;
+ bottom:40px; left:40px;
+ width:120px;height:120px;
+ border-radius:50%;
+ background:rgba(0,255,255,.08);
+ border:2px solid #0ff;
+}
+#stick{
+ position:absolute;
+ top:40px; left:40px;
+ width:40px;height:40px;
+ border-radius:50%;
+ background:#00ffd5;
+ box-shadow:0 0 15px #00ffd5;
+}
+
+/* ===== BUTTON ===== */
+#shoot{
+ position:fixed;
+ bottom:60px; right:60px;
+ width:80px;height:80px;
+ border-radius:50%;
+ background:rgba(255,0,85,.25);
+ border:2px solid #ff0055;
+ color:#ff0055;
+ font-size:26px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- LOBBY -->
+<div id="lobby">
+ <h1>FF KAWEK</h1>
+ <button class="lobby-btn" onclick="startGame()">START GAME</button>
+</div>
+
+<div id="ui">
+ ❤️ HP: <span id="hp">1000</span><br>
+ 🔫 AMMO: <span id="ammo">100</span><br>
+ 🎯 SCORE: <span id="score">0</span>
+</div>
+
+<div id="crosshair"></div>
+<canvas id="game"></canvas>
+
+<div id="joystick"><div id="stick"></div></div>
+<button id="shoot"></button>
+
+<script>
+/* ===== CANVAS ===== */
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+function resize(){
+ canvas.width=innerWidth;
+ canvas.height=innerHeight;
+}
+addEventListener("resize",resize); resize();
+
+/* ===== STATE ===== */
+let playing=false;
+let player={x:300,y:200,hp:1000};
+let bullets=[], enemies=[];
+let ammo=100, score=0;
+let joy={x:0,y:0};
+
+/* ===== WEAPON ===== */
+const weapons={
+ pistol:{rate:400,speed:110,damage:50},
+ smg:{rate:120,speed:52,damage:50},
+ ar:{rate:200,speed:20,damage:50}
+};
+let currentWeapon="smg";
+let lastShot=0;
+
+/* ===== MAP WALLS (COVER) ===== */
+const walls=[
+ {x:300,y:200,w:120,h:30},
+ {x:600,y:350,w:40,h:140},
+ {x:900,y:180,w:150,h:30}
+];
+
+/* ===== START ===== */
+function startGame(){
+ lobby.style.display="none";
+ playing=true;
+ loop();
+}
+
+/* ===== JOYSTICK ===== */
+let dragging=false;
+joystick.ontouchstart=()=>dragging=true;
+joystick.ontouchend=()=>{
+ dragging=false;
+ joy.x=joy.y=0;
+ stick.style.left="40px";
+ stick.style.top="40px";
+};
+joystick.ontouchmove=e=>{
+ if(!dragging)return;
+ const r=joystick.getBoundingClientRect();
+ let x=e.touches[0].clientX-r.left-60;
+ let y=e.touches[0].clientY-r.top-60;
+ const d=Math.hypot(x,y);
+ if(d>40){x*=40/d;y*=40/d;}
+ joy.x=x/40; joy.y=y/40;
+ stick.style.left=40+x+"px";
+ stick.style.top=40+y+"px";
+};
+
+/* ===== SHOOT ===== */
+shoot.onclick=()=>{
+ const now=Date.now();
+ const w=weapons[currentWeapon];
+ if(ammo<=0||now-lastShot<w.rate)return;
+ lastShot=now;
+
+ let target=enemies[0];
+ enemies.forEach(e=>{
+  if(!target||Math.hypot(e.x-player.x,e.y-player.y)<
+     Math.hypot(target.x-player.x,target.y-player.y))
+   target=e;
+ });
+
+ let dx=0,dy=-1;
+ if(target){
+  const d=Math.hypot(target.x-player.x,target.y-player.y);
+  dx=(target.x-player.x)/d;
+  dy=(target.y-player.y)/d;
+ }
+
+ bullets.push({x:player.x,y:player.y,dx,dy,speed:w.speed,dmg:w.damage});
+ ammo--; ammoEl.textContent=ammo;
+};
+
+/* ===== DASH ===== */
+let dashCD=false;
+addEventListener("dblclick",()=>{
+ if(dashCD)return;
+ player.x+=joy.x*80;
+ player.y+=joy.y*80;
+ dashCD=true;
+ setTimeout(()=>dashCD=false,1000);
+});
+
+/* ===== ENEMY SPAWN ===== */
+setInterval(()=>{
+ if(!playing)return;
+ enemies.push({
+  x:Math.random()*canvas.width,
+  y:-50,
+  hp:60,
+  speed:3
+ });
+},1200);
+
+/* ===== DRAW STICKMAN ===== */
+function drawMan(x,y,color){
+ ctx.strokeStyle=color;
+ ctx.lineWidth=3;
+ ctx.beginPath();
+ ctx.arc(x,y-12,8,0,Math.PI*2);
+ ctx.moveTo(x,y-4);ctx.lineTo(x,y+20);
+ ctx.moveTo(x,y+5);ctx.lineTo(x-10,y+12);
+ ctx.moveTo(x,y+5);ctx.lineTo(x+10,y+12);
+ ctx.moveTo(x,y+20);ctx.lineTo(x-8,y+35);
+ ctx.moveTo(x,y+20);ctx.lineTo(x+8,y+35);
+ ctx.stroke();
+}
+
+/* ===== COLLISION ===== */
+function hitWall(x,y){
+ return walls.some(w=>x>w.x&&x<w.x+w.w&&y>w.y&&y<w.y+w.h);
+}
+
+/* ===== LOOP ===== */
+function loop(){
+ if(!playing)return;
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+
+ player.x+=joy.x*5;
+ player.y+=joy.y*5;
+
+ // walls
+ ctx.fillStyle="#334155";
+ walls.forEach(w=>ctx.fillRect(w.x,w.y,w.w,w.h));
+
+ drawMan(player.x,player.y,"#00ffd5");
+
+ bullets.forEach((b,i)=>{
+  b.x+=b.dx*b.speed;
+  b.y+=b.dy*b.speed;
+  if(hitWall(b.x,b.y))bullets.splice(i,1);
+  ctx.fillStyle="#ff0055";
+  ctx.fillRect(b.x-2,b.y-2,4,4);
+ });
+
+ enemies.forEach((e,i)=>{
+  e.x+=(player.x-e.x)*0.01;
+  e.y+=e.speed;
+  drawMan(e.x,e.y,"red");
+
+  bullets.forEach((b,bi)=>{
+   if(Math.hypot(b.x-e.x,b.y-e.y)<20){
+    e.hp-=b.dmg;
+    bullets.splice(bi,1);
+    if(e.hp<=0){
+     enemies.splice(i,1);
+     score+=20;
+     scoreEl.textContent=score;
+    }
+   }
+  });
+
+  if(Math.hypot(e.x-player.x,e.y-player.y)<25){
+   player.hp-=0.4;
+   hpEl.textContent=Math.floor(player.hp);
+  }
+ });
+
+ if(player.hp<=0){
+  alert("GAME OVER\nSCORE: "+score);
+  location.reload();
+ }
+
+ requestAnimationFrame(loop);
+}
+
+const hpEl=hp, ammoEl=ammo, scoreEl=score;
+</script>
+</body>
+</html>
